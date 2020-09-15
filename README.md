@@ -7,7 +7,7 @@ Overall, there are 184,920 samples in the dataset, which is split into a trainin
 
 
 # How to get VMSMO corpus?
-Signed the following copyright announcement with your name and organization. Then complete the form online() and mail to xy-chen#pku.edu.cn ('#'->'@'), we will send you the corpus by e-mail when approved.
+Signed the following copyright announcement with your name and organization. Then complete the form online(https://forms.gle/2cXTasjx6Pr9n1jeA) and mail to xy-chen#pku.edu.cn ('#'->'@'), we will send you the corpus by e-mail when approved.
 
 # Copyright
 The original copyright belongs to the source owner.
