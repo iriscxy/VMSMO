@@ -1,4 +1,3 @@
-### VMSMO
 ### VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles
 
 This repository contains dataset for the EMNLP 2020 paper VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles. 
