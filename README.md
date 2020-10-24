@@ -1,6 +1,6 @@
 ### VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles
 
-This repository contains dataset for the EMNLP 2020 paper VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles. 
+This repository contains code and dataset for the EMNLP 2020 paper VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles. 
 
 # About the corpus
 Overall, there are 184,920 samples in the dataset, which is split into a training set of 180,000 samples, a validation set of 2,460 samples, and a test set of 2,460 samples.
