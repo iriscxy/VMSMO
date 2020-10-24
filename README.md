@@ -20,7 +20,7 @@ The dataset is only for research purposes. Without permission, it may not be use
 We appreciate your citation if you find our dataset is beneficial.
 
 ```
-@inproceedings{chen2020vmsmo,
+@inproceedings{Li020vmsmo,
   title={Learning to Generate Multimodal Summary for Video-based News Articles},
   author={Mingzhe Li, Xiuying Chen, Shen Gao, Zhangming Chan, Dongyan Zhao and Rui Yan},
   booktitle = {EMNLP},
