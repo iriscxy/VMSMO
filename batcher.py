@@ -23,7 +23,8 @@ import time
 import numpy as np
 import tensorflow as tf
 import data
-
+import cv2
+import json
 
 class Example(object):
   """Class representing a train/val/test example for text summarization."""
@@ -63,8 +64,9 @@ class Example(object):
     # Get the decoder input sequence and target sequence
     self.dec_input, self.target = self.get_dec_inp_targ_seqs(abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
     self.dec_len = len(self.dec_input)
-    self.dec_pic_target = np.zeros((hps.max_side_steps), dtype=np.float32)
-    self.dec_pic_target[self.target_pic] = 1
+    # self.dec_pic_target = np.zeros((hps.max_side_steps), dtype=np.float32)
+    # self.dec_pic_target[self.target_pic] = 1
+    self.dec_pic_target = self.target_pic
 
     # If using pointer-generator mode, we need to store some extra info
     if hps.pointer_gen:
@@ -169,7 +171,7 @@ class Batch(object):
     # Pad the encoder input sequences up to the length of the longest sequence
     for ex in example_list:
       ex.pad_encoder_input(max_enc_seq_len, self.pad_id)
-      ex.pad_sideinfo_input(max_side_seq_len, self.pad_id)
+      # ex.pad_sideinfo_input(max_side_seq_len, self.pad_id)
 
     # Initialize the numpy arrays
     # Note: our enc_batch can have different length (second dimension) for each batch because we use dynamic_rnn for the encoder.
@@ -177,7 +179,7 @@ class Batch(object):
     self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
     self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
 
-    self.side_batch = np.zeros((hps.batch_size, max_side_seq_len, 2048), dtype=np.float32)
+    self.side_batch = np.zeros((hps.batch_size, max_side_seq_len, 32, 64, 3), dtype=np.float32)
     self.side_lens = np.zeros((hps.batch_size), dtype=np.int32)
     self.side_padding_mask = np.zeros((hps.batch_size, max_side_seq_len), dtype=np.float32)
     self.segment_padding_mask = np.zeros((hps.batch_size, int(max_side_seq_len / 5)), dtype=np.float32)
@@ -189,7 +191,7 @@ class Batch(object):
       for j in range(ex.enc_len):
         self.enc_padding_mask[i][j] = 1
 
-      self.side_batch[i, :, :] = np.array(ex.side_input)[:, :]
+      self.side_batch[i, :, :, :, :] = np.array(ex.side_input)[:, :, :, :]
       self.side_lens[i] = ex.side_len
       for j in range(ex.side_len):
         self.side_padding_mask[i][j] = 1
@@ -225,13 +227,15 @@ class Batch(object):
     self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.dec_padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
-    self.dec_pic_target = np.zeros((hps.batch_size, hps.max_side_steps), dtype=np.float32)
+    # self.dec_pic_target = np.zeros((hps.batch_size, hps.max_side_steps), dtype=np.float32)
+    self.dec_pic_target = np.zeros((hps.batch_size), dtype=np.int32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.dec_batch[i, :] = ex.dec_input[:]
       self.target_batch[i, :] = ex.target[:]
-      self.dec_pic_target[i, :] = ex.dec_pic_target[:]
+      # self.dec_pic_target[i, :] = ex.dec_pic_target[:]
+      self.dec_pic_target[i] = ex.dec_pic_target
       for j in range(ex.dec_len):
         self.dec_padding_mask[i][j] = 1
 
@@ -400,13 +404,33 @@ class Batcher(object):
     #     tf.logging.warning('Found an example with empty article text. Skipping it.')
     #   else:
     #     yield (article_text, abstract_text)
+    num = 0
     while True:
       file = next(example_generator)
       try:
         article = file['content']
         abstract = file['title']
-        frames = file['frames']
-        max_sim = file['max']
+        start = int(file['start'])
+        end = int(file['end'])
+        # frames = file['frames']
+        if file['max_sim'] == '0':
+          continue
+
+        frames = []
+        output, max_sim = pick_arange(np.arange(start, end), 10, int(file['max_sim']))
+
+        if len(output) != 10:
+          continue
+        # tmp = int((end-start)/10)
+        for i in output:
+          # if self._hps.mode == 'train':
+          image = cv2.resize(cv2.imread("/share/lmz/video_sum_data/video_new_img/train/{}.jpg".format(i)), (64, 32))
+          # else:
+          #     image = cv2.resize(cv2.imread("/share/lmz/video_sum_data/video_new_img/test/{}.jpg".format(i)), (64, 32))
+          frames.append(image)
+
+        max_sim = np.argwhere(output == max_sim)[0][0].astype(np.int32)
+
       except ValueError:
         tf.logging.error('Failed to get article or abstract from example')
         continue
@@ -416,4 +440,30 @@ class Batcher(object):
       if len(frames) == 0 or max_sim < 0:
         continue
       else:
+        # tgt = open('/home1/lmz/video_data/test_pic_new.json', 'a', encoding='utf-8')
+        # json.dump(file, tgt)
+        # tgt.write('\n')
         yield (article, abstract, frames, max_sim)
+
+
+def pick_arange(arange, num, max_sim):
+  if num > len(arange):
+    # print("# num out of length, return arange:", end=" ")
+    return arange, max_sim
+  else:
+    min = 200
+    pis = max_sim
+    output = np.array([], dtype=arange.dtype)
+    seg = len(arange) / num
+    for n in range(num):
+      if int(seg * (n+1)) >= len(arange):
+        output = np.append(output, arange[-1])
+        if abs(arange[-1]-max_sim) < min:
+          min = abs(arange[-1]-max_sim)
+          pis= arange[-1]
+      else:
+        output = np.append(output, arange[int(seg * n)])
+        if abs(arange[int(seg * n)]-max_sim) < min:
+          min = abs(arange[int(seg * n)]-max_sim)
+          pis= arange[int(seg * n)]
+    return output, pis

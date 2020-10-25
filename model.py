@@ -24,10 +24,12 @@ from attention_decoder import attention_decoder
 from opennmt.layers import transformer
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import math_ops
-import pandas as pd
+from pairwise_losses import pairwise_hinge_loss
+# from slim.resnet152_img import extract_feature
+from slim.nets.resnet_v1 import resnet_v1_152, resnet_arg_scope
 
 FLAGS = tf.app.flags.FLAGS
-
+slim = tf.contrib.slim
 
 class SummarizationModel(object):
     """A class to represent a sequence-to-sequence model for text summarization. Supports both baseline mode, pointer-generator mode, and coverage"""
@@ -45,9 +47,9 @@ class SummarizationModel(object):
         self._enc_lens = tf.placeholder(tf.int32, [FLAGS.batch_size], name='enc_lens')
         self._enc_padding_mask = tf.placeholder(tf.float32, [FLAGS.batch_size, None], name='enc_padding_mask')
 
-        self._side_batch = tf.placeholder(tf.float32, [FLAGS.batch_size, None, 2048], name='side_batch')
+        self._side_batch = tf.placeholder(tf.float32, [FLAGS.batch_size, FLAGS.max_side_steps, 32, 64, 3], name='side_batch')
         self._side_lens = tf.placeholder(tf.int32, [FLAGS.batch_size], name='side_lens')
-        self._side_padding_mask = tf.placeholder(tf.float32, [FLAGS.batch_size, None], name='side_padding_mask')
+        self._side_padding_mask = tf.placeholder(tf.float32, [FLAGS.batch_size, FLAGS.max_side_steps], name='side_padding_mask')
         self._segment_padding_mask = tf.placeholder(tf.float32, [FLAGS.batch_size, None], name='segment_padding_mask')
 
         if FLAGS.pointer_gen:
@@ -61,8 +63,10 @@ class SummarizationModel(object):
         self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
         self._dec_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps],
                                                 name='dec_padding_mask')
-        self._dec_pic_target = tf.placeholder(tf.float32, [FLAGS.batch_size, None],
-                                                name='target_pic_batch')
+        # self._dec_pic_target = tf.placeholder(tf.float32, [FLAGS.batch_size, None],
+        #                                         name='target_pic_batch')
+        self._dec_pic_target = tf.placeholder(tf.int32, [FLAGS.batch_size],
+                                              name='target_pic_batch')
 
         if hps.mode == "decode" and hps.coverage:
             self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
@@ -161,7 +165,7 @@ class SummarizationModel(object):
             # encoder_outputs = rnn_encoder_outputs
             fw_st = rnn_fw_st
             bw_st = rnn_bw_st
-            side_states = tf.concat(self._reduce_states(fw_st, bw_st), -1)
+            side_states = tf.layers.dense(tf.concat(self._reduce_states(fw_st, bw_st), -1), FLAGS.hidden_dim*2)
             return side_states
 
 
@@ -294,24 +298,25 @@ class SummarizationModel(object):
             W_s = tf.get_variable("W_s", [1, 1, FLAGS.hidden_dim, attention_vec_size])
 
             side_features = tf.expand_dims(emb_side_inputs, axis=2)
-            segment_features = tf.expand_dims(self._side_states, axis=2)
+            # segment_features = tf.expand_dims(self._side_states, axis=2)
 
-            segment_features = nn_ops.conv2d(segment_features, W_h, [1, 1, 1, 1], "SAME")
+            # segment_features = nn_ops.conv2d(segment_features, W_h, [1, 1, 1, 1], "SAME")
             side_features = nn_ops.conv2d(side_features, W_s, [1, 1, 1, 1], "SAME")
 
             # Calculate v^T tanh(W_h h_i + W_s s_t + b_attn)
-            e_h = math_ops.reduce_sum(v_h * math_ops.tanh(segment_features + decoder_features),
-                                      [2, 3])  # calculate e
+            # e_h = math_ops.reduce_sum(v_h * math_ops.tanh(segment_features + decoder_features),
+            #                           [2, 3])  # calculate e
             e_s = math_ops.reduce_sum(v_h * math_ops.tanh(side_features + decoder_features),
                                       [2, 3])  # calculate e
 
             # Calculate attention distribution
-            attn_segment = masked_attention(e_h, self._segment_padding_mask)
-            attn_segment = tf.reshape(tf.tile(tf.expand_dims(attn_segment, 1), [1, 5, 1]), [FLAGS.batch_size, -1])
+            # attn_segment = masked_attention(e_h, self._segment_padding_mask)
+            # attn_segment = tf.reshape(tf.tile(tf.expand_dims(attn_segment, 1), [1, 5, 1]), [FLAGS.batch_size, -1])
             attn_side = masked_attention(e_s, self._side_padding_mask)
-            attn_side = nn_ops.softmax(tf.multiply(attn_side, attn_segment))
+            # attn_side = nn_ops.softmax(tf.multiply(attn_side, attn_segment))
+            # attn_side = tf.multiply(attn_side, attn_segment)
 
-        return attn_segment, attn_side
+        return attn_side
 
     def cross_attention(self, table_encodes, document_encodes, num_units, num_heads, num_layers, ffn_inner_dim,
                         sequence_length=None, mode=tf.estimator.ModeKeys.TRAIN):
@@ -371,6 +376,14 @@ class SummarizationModel(object):
         """Add the whole sequence-to-sequence model to the graph."""
         hps = self._hps
         vsize = self._vocab.size()  # size of the vocabulary
+        # with tf.variable_scope('image_encoder'):
+        self.reshaped_pix = tf.reshape(self._side_batch, [-1, 32, 64, 3])
+        with slim.arg_scope(resnet_arg_scope()):
+            net, end_points = resnet_v1_152(self.reshaped_pix, is_training=FLAGS.mode == 'train')
+            # feat1 = end_points['resnet_v1_152/block4']
+        pic_encoded = end_points['global_pool']
+        # self.end_points = end_points
+        # self.net = net
 
         with tf.variable_scope('seq2seq'):
             # Some initializers
@@ -386,47 +399,39 @@ class SummarizationModel(object):
                                                         self._enc_batch)  # tensor with shape (batch_size, max_enc_steps, emb_size)
                 emb_dec_inputs = [tf.nn.embedding_lookup(embedding, x) for x in tf.unstack(self._dec_batch,
                                                                                            axis=1)]  # list length max_dec_steps containing shape (batch_size, emb_size)
-
+            pic_encoded = tf.reshape(tf.squeeze(pic_encoded), [FLAGS.batch_size, FLAGS.max_side_steps, -1])
+            emb_side_inputs = tf.layers.dense(pic_encoded, FLAGS.emb_dim * 2)
             # Add the encoder.
             enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self._enc_lens)
-            emb_side_inputs = tf.layers.dense(self._side_batch, FLAGS.emb_dim, activation=tf.nn.relu)
             # batch_size * pic_num * emb_dim
-            new_emb_side_inputs = tf.reshape(emb_side_inputs, [FLAGS.batch_size * int(FLAGS.max_side_steps/5), 5, FLAGS.hidden_dim])
+            new_emb_side_inputs = tf.reshape(emb_side_inputs, [FLAGS.batch_size * int(FLAGS.max_side_steps/5), 5, FLAGS.hidden_dim*2])
             # (batch_size*pic_num/5) * 5 * emb_dim
 
             side_states = self._add_side_rnn_encoder(new_emb_side_inputs, 5 * tf.ones((new_emb_side_inputs.get_shape()[0]), dtype=tf.int32))
             self._side_inputs = tf.reshape(side_states, [FLAGS.batch_size, -1, FLAGS.hidden_dim * 2])
-            side_outputs, sfw_st, sbw_st = self._add_side_encoder(self._side_inputs, self._side_lens)
             self._enc_states = enc_outputs
 
             # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce the final encoder hidden state to the right size to be the initial decoder hidden state
             self._dec_in_state = self._reduce_states(fw_st, bw_st)
             self._last_state = tf.concat(self._dec_in_state, -1)
-            conditional_vec = tf.expand_dims(self._last_state, 1)
-            conditional_weight = tf.layers.dense(tf.multiply(conditional_vec, side_outputs), 1)
-            self._cond_side_states = tf.multiply(side_outputs, conditional_weight)
 
             with tf.variable_scope('interaction'):
                 change_side_states = tf.transpose(self._side_inputs, [0, 2, 1])
                 self._change_side_states = change_side_states
                 attn_matrix = tf.matmul(self._enc_states, change_side_states)
-                self.attn_matrix = attn_matrix
                 # batch_size * enc_len * side_len
-                self._video_aware_enc_states = tf.matmul(attn_matrix, side_outputs)
+                self._video_aware_enc_states = tf.matmul(attn_matrix, self._side_inputs)
                 self._news_aware_side_states = tf.matmul(tf.transpose(attn_matrix, [0, 2, 1]), self._enc_states)
                 gate = tf.layers.dense(self._last_state, 1, activation=tf.nn.sigmoid)
                 gate = tf.expand_dims(tf.tile(gate, [1, FLAGS.hidden_dim * 2]), 1)
                 ones = np.ones([FLAGS.batch_size, 1, FLAGS.hidden_dim * 2])
                 self._enc_states = gate * self._enc_states + (ones - gate) * self._video_aware_enc_states
-                # self._enc_states = tf.layers.dense(context_vector, FLAGS.hidden_dim * 2)
-                # self._enc_states = tf.layers.dense(tf.concat([self._enc_states, self._video_aware_enc_states], -1), FLAGS.hidden_dim * 2)
-                self._side_states = tf.layers.dense(tf.concat([self._news_aware_side_states, self._cond_side_states, side_outputs], -1), FLAGS.hidden_dim * 2)
 
             # Add the decoder.
             with tf.variable_scope('decoder'):
                 decoder_outputs, self._dec_out_state, self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
-                attn_seg, attn_side = self.pic_attention(emb_side_inputs)
-                self._attn_side = attn_side
+                # attn_seg, attn_side = self.pic_attention(emb_side_inputs)
+                # self._attn_side = attn_side
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
@@ -481,13 +486,52 @@ class SummarizationModel(object):
                         self._total_loss = self._loss + hps.cov_loss_wt * self._coverage_loss
                         tf.summary.scalar('total_loss', self._total_loss)
 
-                with tf.variable_scope('pic_loss'):
-                    self._loss_pic = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=attn_side,
-                                                                                       labels=self._dec_pic_target))
-                    # self._loss_unified = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=attn_side,
-                    #                                                                    labels=attn_seg))
-                self._all_loss = self._loss + self._loss_pic
+                # with tf.variable_scope('pic_loss'):
+                #     self._loss_pic = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=attn_side,
+                #                                                                        labels=self._dec_pic_target))
+                #     # self._loss_unified = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=attn_side,
+                #     #                                                                    labels=attn_seg))
+                # self._all_loss = self._loss_pic
                 # self._all_loss = self._loss
+
+        with tf.variable_scope('side'):
+            emb_side_inputs = tf.nn.l2_normalize(emb_side_inputs, dim=-1)
+
+            # self-attention
+            side_outputs, sfw_st, sbw_st = self._add_side_encoder(self._side_inputs, self._side_lens)
+            conditional_vec = tf.expand_dims(self._last_state, 1)
+            conditional_weight = tf.layers.dense(tf.multiply(conditional_vec, side_outputs), 1)
+            self._cond_side_states = tf.multiply(side_outputs, conditional_weight)
+
+            s_gate = tf.layers.dense(self._last_state, 1, activation=tf.nn.sigmoid)
+            s_gate = tf.expand_dims(s_gate, 1)
+            s_ones = np.ones_like(s_gate)
+            self._side_states = s_gate * self._news_aware_side_states + (s_ones - s_gate) * self._cond_side_states
+
+            fusion_gate = tf.layers.dense(self._last_state, 1, activation=tf.nn.sigmoid)
+            fusion_gate = tf.expand_dims(tf.tile(fusion_gate, [1, FLAGS.hidden_dim * 2]), 1)
+            fusion_ones = tf.ones_like(fusion_gate)
+            side_states = tf.nn.l2_normalize(tf.reshape(tf.tile(tf.expand_dims(self._side_states, 1), [1, 5, 1, 1]), [FLAGS.batch_size, -1, FLAGS.hidden_dim * 2]), dim=-1)
+            fusion_side = fusion_gate * emb_side_inputs + (fusion_ones - fusion_gate) * side_states
+
+            attn_side = tf.squeeze(tf.layers.dense(fusion_side, 1, kernel_initializer=tf.contrib.layers.xavier_initializer()))
+            attn_side = nn_ops.softmax(attn_side)
+            self.attn_side = attn_side
+
+            # last_state = tf.nn.l2_normalize(tf.tile(tf.expand_dims(self._last_state, 1), [1, 10, 1]), dim=-1)
+            # emb_side_inputs = tf.nn.l2_normalize(emb_side_inputs, dim=-1)
+            # attn_side = tf.squeeze(tf.layers.dense(tf.concat([last_state, emb_side_inputs], -1), 1, activation=tf.nn.sigmoid, kernel_initializer=tf.contrib.layers.xavier_initializer()))
+            # self.attn_side = attn_side
+
+            with tf.variable_scope('pic_loss'):
+                # self._loss_pic = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=attn_side,
+                #                                                                         labels=self._dec_pic_target))
+                # self._loss_pic = pairwise_hinge_loss(logits=attn_side, labels=self._dec_pic_target)
+                self._loss_pic = pairwise_hinge_loss(logits=attn_side, labels=tf.one_hot(self._dec_pic_target, FLAGS.max_side_steps))
+        if hps.mode in ['train', 'eval']:
+            self._all_loss = self._loss + self._loss_pic
+
+
 
         if hps.mode == "decode" or hps.mode == 'auto_decode':
             # We run decode beam search mode one decoder step at a time
@@ -500,9 +544,15 @@ class SummarizationModel(object):
         """Sets self._train_op, the op to run for training."""
         # Take gradients of the trainable variables w.r.t. the loss function to minimize
         # loss_to_minimize = self._total_loss if FLAGS.coverage else self._loss
-        loss_to_minimize = self._all_loss
-        tvars = tf.trainable_variables()
-        gradients = tf.gradients(loss_to_minimize, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+        # loss_to_minimize_1 = self._loss
+        # tvars_1 = tf.trainable_variables(scope='seq2seq')
+        # gradients_1 = tf.gradients(loss_to_minimize_1, tvars_1, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+
+        loss_to_minimize_2 = self._all_loss
+        tvars_2 = tf.trainable_variables()
+        # tvars_2 = tf.trainable_variables(scope='side')
+        gradients_2 = tf.gradients(loss_to_minimize_2, tvars_2, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
+
 
         # # Clip the gradients
         # tf.logging.info('Clipping gradients...')
@@ -525,15 +575,19 @@ class SummarizationModel(object):
 
         # Clip the gradients
         with tf.device("/gpu:0"):
-            grads, global_norm = tf.clip_by_global_norm(gradients, self._hps.max_grad_norm)
+            # grads_1, global_norm_1 = tf.clip_by_global_norm(gradients_1, self._hps.max_grad_norm)
+            grads_2, global_norm_2 = tf.clip_by_global_norm(gradients_2, self._hps.max_grad_norm)
 
         # Add a summary
-        tf.summary.scalar('global_norm', global_norm)
+        # tf.summary.scalar('global_norm', global_norm)
 
         # Apply adagrad optimizer
-        optimizer = tf.train.AdagradOptimizer(self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
+        optimizer = tf.train.AdamOptimizer(self._hps.lr)
+        # optimizer = tf.train.AdagradOptimizer(self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
         with tf.device("/gpu:0"):
-            self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step, name='train_step')
+            # self._train_op_1 = optimizer.apply_gradients(zip(grads_1, tvars_1), global_step=self.global_step, name='train_step_1')
+            self._train_op_2 = optimizer.apply_gradients(zip(grads_2, tvars_2), global_step=self.global_step, name='train_step_2')
+
 
     def build_graph(self):
         """Add the placeholders, model, global step, train_op and summaries to the graph"""
@@ -552,10 +606,14 @@ class SummarizationModel(object):
     def run_train_step(self, sess, batch):
         """Runs one training iteration. Returns a dictionary containing train op, summaries, loss, global_step and (optionally) coverage loss."""
         feed_dict = self._make_feed_dict(batch)
+        # tf.logging.info(np.argmax(np.array(tmp_attn), axis=1))
         to_return = {
-            'train_op': self._train_op,
-            'summaries': self._summaries,
-            'loss': self._all_loss,
+            # 'train_op_1': self._train_op_1,
+            'train_op_2': self._train_op_2,
+            # 'summaries': self._summaries,
+            'all_loss': self._all_loss,
+            's2s_loss': self._loss,
+            'pic_loss': self._loss_pic,
             'global_step': self.global_step,
         }
         if self._hps.coverage:
@@ -586,27 +644,27 @@ class SummarizationModel(object):
           dec_in_state: A LSTMStateTuple of shape ([1,hidden_dim],[1,hidden_dim])
         """
         feed_dict = self._make_feed_dict(batch, just_enc=True)  # feed the batch into the placeholders
-        (enc_states, dec_in_state, attn_side, attn_martix, global_step) = sess.run([self._enc_states, self._dec_in_state, self._attn_side, self.attn_matrix, self.global_step],
+        (enc_states, dec_in_state, attn_side, global_step) = sess.run([self._enc_states, self._dec_in_state, self.attn_side, self.global_step],
                                                            feed_dict)  # run the encoder
-
+        # tmp_attn = sess.run(self._attn_side, feed_dict)
+        labels = np.argmax(np.array(attn_side), axis=1)
+        # logits = batch.dec_pic_target
+        # same = 0
+        # for i in range(len(labels)):
+        #     if labels[i] == logits[i]:
+        #         same += 1
+        # tf.logging.info(same / len(labels))
+        # if labels[0] == logits[0]:
+            # same += 1
+            # tgt = open('/home1/lmz/video_data/test_multi', 'a', encoding='utf-8')
+            # tgt.write(batch.original_abstracts[0] + '\n')
+        # print(same)
         # dec_in_state is LSTMStateTuple shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
         # Given that the batch is a single example repeated, dec_in_state is identical across the batch so we just take the top row.
         dec_in_state = tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[0], dec_in_state.h[0])
-        pic_num = np.argmax(attn_side, 1)
-        # A = np.array([[1, 2], [3, 2], [1, 1], [3, 5], [5, 2]])
-        data = attn_martix[0]
-        # _range = np.max(data) - np.min(data)
-        # data = (data - np.min(data)) / _range
-        data = softmax(data)
-        data = pd.DataFrame(data)
-
-        writer = pd.ExcelWriter('A.xlsx')  # 写入Excel文件
-        data.to_excel(writer, 'page_1', float_format='%.6f')  # ‘page_1’是写入excel的sheet名
-        writer.save()
-
-        writer.close()
+        # pic_num = np.argmax(np.array(attn_side), 1)
         # pic = (batch.side_batch.tolist())[pic_num]
-        return enc_states, dec_in_state, pic_num
+        return enc_states, dec_in_state, labels, attn_side
 
     def decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
         """For beam search decoding. Run the decoder for one step.
@@ -724,11 +782,50 @@ def _coverage_loss(attn_dists, padding_mask):
     coverage_loss = _mask_and_avg(covlosses, padding_mask)
     return coverage_loss
 
-def softmax(x):
-    x_row_max = x.max(axis=-1)
-    x_row_max = x_row_max.reshape(list(x.shape)[:-1]+[1])
-    x = x - x_row_max
-    x_exp = np.exp(x)
-    x_exp_row_sum = x_exp.sum(axis=-1).reshape(list(x.shape)[:-1]+[1])
-    softmax = x_exp / x_exp_row_sum
-    return softmax
+
+def batch_coattention_nnsubmulti(utterance, response, utterance_mask, scope="co_attention", reuse=None):
+    '''Point-wise interaction. (NNSUBMULTI)
+    Args:
+      utterance: [batch*turns, len_utt, dim]
+      response: [batch*turns, len_res, dim]
+      scope: Optional scope for `variable_scope`.
+
+    Returns:
+      A 3d tensor with the same shape and dtype as response
+    '''
+
+    with tf.variable_scope(scope, reuse=reuse):
+        dim = utterance.get_shape().as_list()[-1]
+
+        weight = tf.get_variable('Weight', shape=[dim, dim], dtype=tf.float32)
+        e_utterance = tf.einsum('aij,jk->aik', utterance, weight)
+        # [batch, len_res, dim] * [batch, len_utterance, dim]T -> [batch, len_res, len_utterance]
+        a_matrix = tf.matmul(response, tf.transpose(e_utterance, perm=[0, 2, 1]))  # [batch, len_res, len_utterance]
+
+        # [batch, len_res, len_utterance] * [?, len_utterance, dim] -> [?, len_res, dim]
+        # a_matrix = tf.add(a_matrix, tf.expand_dims(tf.multiply(tf.constant(-1000000.0), 1-utterance_mask), axis=1))
+        # reponse_atten = tf.matmul(tf.nn.softmax(a_matrix, dim=-1), utterance)
+
+        reponse_atten = tf.matmul(rx_masked_softmax(a_matrix, utterance_mask), utterance)  #
+
+        feature_mul = tf.multiply(reponse_atten, response)
+        feature_sub = tf.subtract(reponse_atten, response)
+        feature_last = tf.layers.dense(tf.concat([feature_mul, feature_sub], axis=-1), dim, use_bias=True,
+                                       activation=tf.nn.relu, reuse=reuse)  # [batch*turn, len, dim]
+    return feature_last
+
+def rx_masked_softmax(scores, mask):
+    """
+    Used to calculcate a softmax score with true sequence length (without padding), rather than max-sequence length.
+    Input shape: (batch_size, len_res, len_utt).
+    mask parameter: Tensor of shape (batch_size, len_utt). Such a mask is given by the length() function.
+    return shape: [batch_size, len_res, len_utt]
+    """
+    numerator = tf.exp(tf.subtract(scores, tf.reduce_max(scores, 2, keep_dims=True))) * tf.expand_dims(mask, axis=1)
+    denominator = tf.reduce_sum(numerator, 2, keep_dims=True)
+
+    # weights = tf.div(numerator, denominator)
+    # weights = tf.div(numerator, denominator+1e-3)
+    weights = tf.div(numerator + 1e-5 / mask.get_shape()[-1].value, denominator + 1e-5)
+    return weights
+

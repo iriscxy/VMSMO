@@ -27,6 +27,7 @@ import util
 import logging
 import numpy as np
 import shutil
+from evaluation import evaluation
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -88,6 +89,8 @@ class BeamSearchDecoder(object):
         """Decode examples until data is exhausted (if FLAGS.single_pass) and return, or decode indefinitely, loading latest checkpoint at regular intervals"""
         t0 = time.time()
         counter = 0
+        all_logits = []
+        all_one_hot_lables = []
         while True:
             batch = self._batcher.next_batch()  # 1 example repeated across batch
             if batch is None:  # finished decoding dataset in single_pass mode
@@ -95,6 +98,7 @@ class BeamSearchDecoder(object):
                 tf.logging.info("Decoder has finished reading dataset for single_pass.")
                 tf.logging.info("Output has been saved in %s and %s. Now starting ROUGE eval...", self._rouge_ref_dir,
                                 self._rouge_dec_dir)
+                evaluation(all_logits, all_one_hot_lables, FLAGS.max_side_steps)
                 results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
                 rouge_log(results_dict, self._decode_dir)
                 return
@@ -108,7 +112,16 @@ class BeamSearchDecoder(object):
                                                    (batch.art_oovs[0] if FLAGS.pointer_gen else None))  # string
 
             # Run beam search to get best Hypothesis
-            best_hyp, pic = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+            best_hyp, pic, sticker_logits = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+
+
+            one_hot_targets = np.eye(FLAGS.max_side_steps)[batch.dec_pic_target]
+            for i in range(FLAGS.batch_size):
+                logits = sticker_logits[i].tolist()
+                one_hot = one_hot_targets[i].tolist()
+                for l, o in zip(logits, one_hot):
+                    all_logits.append(l)
+                    all_one_hot_lables.append(o)
 
             # Extract the output ids from the hypothesis and convert back to words
             output_ids = [int(t) for t in best_hyp.tokens[1:]]
@@ -125,7 +138,7 @@ class BeamSearchDecoder(object):
 
             if FLAGS.single_pass:
                 self.write_for_rouge(original_abstract_sents, decoded_words,
-                                     counter, pic)  # write ref summary and decoded summary to file, to eval with pyrouge later
+                                     counter, pic, batch.dec_pic_target[0])  # write ref summary and decoded summary to file, to eval with pyrouge later
                 counter += 1  # this is how many examples we've decoded
             else:
                 print_results(article_withunks, abstract_withunks, decoded_output)  # log output to screen
@@ -141,7 +154,8 @@ class BeamSearchDecoder(object):
                     _ = util.load_ckpt(self._saver, self._sess)
                     t0 = time.time()
 
-    def write_for_rouge(self, reference_sents, decoded_words, ex_index, pic):
+
+    def write_for_rouge(self, reference_sents, decoded_words, ex_index, pic, logit_pic):
         """Write output to file in correct format for eval with pyrouge. This is called in single_pass mode.
 
         Args:
@@ -177,7 +191,9 @@ class BeamSearchDecoder(object):
             for idx, sent in enumerate(decoded_sents):
                 f.write(sent) if idx == len(decoded_sents) - 1 else f.write(sent + "\n")
         with open(pic_file, 'a') as f:
-            f.write(str(pic) + "\n")
+            f.write(str(pic) + ' ' + str(logit_pic) + "\n")
+        if str(pic) == str(logit_pic):
+            open('/home1/lmz/video_data/new_test_multi', 'a').write(str(ex_index) + '\n')
 
         tf.logging.info("Wrote example %i to file" % ex_index)
 

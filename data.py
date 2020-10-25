@@ -173,6 +173,7 @@ def json_generator(data_path, single_pass):
         try:
           obj = json.loads(line)
           data_counter += 1
+          # print(data_counter)
           yield obj
         except Exception as e:
           print('解析json出错, %s' % e)

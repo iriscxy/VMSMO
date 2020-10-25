@@ -35,15 +35,17 @@ import glob
 from datetime import datetime
 import csv
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 FLAGS = tf.app.flags.FLAGS
+slim = tf.contrib.slim
 
 # Where to find data
 tf.app.flags.DEFINE_string('data_path', '',
                            'Path expression to tf.Example datafiles. Can include wildcards to access multiple datafiles.')
 tf.app.flags.DEFINE_string('test_path', '', 'path of test.'),
 tf.app.flags.DEFINE_string('vocab_path', '/share/lmz/video_sum_data/vocab', 'Path expression to text vocabulary file.')
+tf.app.flags.DEFINE_string('pretrain_pic_ckpt', '/home1/lmz/video_data/resnet_v1_152.ckpt', 'sticker_path.')
 
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
@@ -61,7 +63,9 @@ tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
 tf.app.flags.DEFINE_integer('max_enc_steps', 400, 'max timesteps of encoder (max source text tokens)')
 tf.app.flags.DEFINE_integer('max_dec_steps', 100, 'max timesteps of decoder (max summary tokens)')
-tf.app.flags.DEFINE_integer('max_side_steps', 200, 'max timesteps of decoder (max summary tokens)')
+tf.app.flags.DEFINE_integer('max_side_steps', 10, 'max timesteps of decoder (max summary tokens)')
+tf.app.flags.DEFINE_enum('inception_endpoint', 'mixed_17x17x768e', ['mixed_8x8x2048b', 'mixed_17x17x768e'], '手工运行auto deocde不会有输出')
+
 
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 10,
@@ -182,7 +186,22 @@ def setup_training(model, batcher):
     # if not FLAGS.pretrain:
     saver = tf.train.Saver(max_to_keep=3)  # keep 3 checkpoints at a time
     epoch_saver = tf.train.Saver(max_to_keep=99)  # keep 3 checkpoints at a time
-
+    checkpoint_exclude_scopes = 'seq2seq,side'
+    exclusions = None
+    if checkpoint_exclude_scopes:
+        exclusions = [
+            scope.strip() for scope in checkpoint_exclude_scopes.split(',')]
+    variables_to_restore = []
+    for var in slim.get_model_variables():
+        excluded = False
+        for exclusion in exclusions:
+            if var.op.name.startswith(exclusion):
+                excluded = True
+        if not excluded:
+            variables_to_restore.append(var)
+    pretrain_saver = tf.train.Saver(var_list=variables_to_restore)
+    # pretrain_saver = tf.train.Saver(var_list={v.name[:-2]: v for v in tf.trainable_variables() if v.name.startswith('image_encoder') and 'logits' not in v.name})  # keep 3 checkpoints at a time
+    # and 'logits' not in v.name
     sv = tf.train.Supervisor(logdir=train_dir,
                              is_chief=True,
                              saver=saver,
@@ -193,6 +212,8 @@ def setup_training(model, batcher):
     tf.logging.info("Preparing or waiting for session...")
     sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
     tf.logging.info("Created session.")
+    tf.logging.info("Loading pretrained parameters.")
+    pretrain_saver.restore(sess_context_manager, FLAGS.pretrain_pic_ckpt)
     try:
         run_training(model, batcher, sess_context_manager, sv,
                      epoch_saver)  # this is an infinite loop until interrupted
@@ -304,17 +325,21 @@ def run_training(model, batcher, sess_context_manager, sv,  epoch_saver):
         return session
 
     with sess_context_manager as sess:
+        losses = []
         while True:  # repeats until interrupted
             batch = batcher.next_batch()
-
             results = model.run_train_step(sess, batch)
             train_step = results['global_step']  # we need this to update our running average loss
-            loss = results['loss']
+            loss = results['all_loss']
+            losses.append(loss)
 
             if train_step % 100 == 0:
                 tf.logging.info('train_step: %f', train_step)  # print the loss to screen
-                tf.logging.info('loss: %f', loss)  # print the loss to screen
+                tf.logging.info('loss: %f', sum(losses)/100)  # print the loss to screen
+                tf.logging.info('s2s_loss: %f', results['s2s_loss'])  # print the loss to screen
+                tf.logging.info('pic_loss: %f', results['pic_loss'])  # print the loss to screen
                 tf.logging.info('===================')  # print the loss to screen
+                losses = []
 
             if not np.isfinite(loss):
                 raise Exception("Loss is not finite. Stopping.")
