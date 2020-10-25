@@ -17,10 +17,15 @@ Data is comming soon.
 
 ### Commands
 train:
+```python
 python run_summarization.py --mode=train --data_path=* --test_path=* --vocab_path=* --log_root=logs --exp_name=vmsmo --max_enc_steps=100 --max_dec_stpes=30 --vocab_size=50000 --lr=0.001
+```
 
 test:
+```python
 python run_summarization.py --mode=decode --data_path=* --test_path=* --vocab_path=* --log_root=logs --exp_name=vmsmo --max_enc_steps=100 --max_dec_stpes=30 --vocab_size=50000 --lr=0.001
+```
+
 
 ## Citation
 We appreciate your citation if you find our dataset is beneficial.
