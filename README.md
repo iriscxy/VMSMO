@@ -9,10 +9,10 @@ Data is comming soon.
 
 ### Requirements
 <ul>
-<li> python 3.6
-<li> tensorflow 1.9
-<li> numpy 4.2
-<li> opencv python 1.16
+<li> python = 3.6
+<li> tensorflow = 1.9
+<li> numpy = 4.2
+<li> opencv python = 1.16
 </ul>
 
 ### Commands
