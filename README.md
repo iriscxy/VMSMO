@@ -28,7 +28,7 @@ python run_summarization.py --mode=decode --data_path=* --test_path=* --vocab_pa
 
 
 ## Citation
-We appreciate your citation if you find our dataset is beneficial.
+We appreciate your citation if you find our dataset and code beneficial.
 
 ```
 @inproceedings{Li2019VMSMO,
