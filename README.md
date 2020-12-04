@@ -31,7 +31,7 @@ python run_summarization.py --mode=decode --data_path=* --test_path=* --vocab_pa
 We appreciate your citation if you find our dataset and code beneficial.
 
 ```
-@inproceedings{Li2019VMSMO,
+@inproceedings{Li2020VMSMO,
   title={VMSMO: Learning to Generate Multimodal Summary for Video-based News Articles},
   author={Mingzhe Li, Xiuying Chen, Shen Gao, Zhangming Chan, Dongyan Zhao, and Rui Yan},
   booktitle = {EMNLP},
