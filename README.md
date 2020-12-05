@@ -9,8 +9,8 @@ We first publish the link (https://drive.google.com/drive/folders/1MpVv9naDaLINI
 - ID: the ID number of the news
 - content: the content of news
 - original_pictures: whether the original microblog has pictures
-- video_uRL: video URL
-- image_uRL: video cover image URL
+- video_url: video URL
+- image_url: video cover image URL
 - publish_place: the place of publication
 - publish_time: the release time of microblog
 - publish_tool: microblog publishing method
@@ -19,6 +19,7 @@ We first publish the link (https://drive.google.com/drive/folders/1MpVv9naDaLINI
 - comment_num: number of comments
 - title: title of the weibo
 ```
+Only the item 'content', 'title', 'video_url' and 'image_url' are needed in our experiment. However, we keep all information in the json files for possible future uses.
 
 The complete dataset is coming soon.
 
