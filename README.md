@@ -3,7 +3,22 @@ Official code and dataset link for ''VMSMO: Learning to Generate Multimodal Summ
 
 ## About the corpus
 VMSMO corpus consists of 184,920 document-summary pairs, with 180,000 training pairs, 2,460 validation and test pairs.
-Data is comming soon.
+
+We first publish the link (https://drive.google.com/drive/folders/1MpVv9naDaLINIo4ZKjGoZZHqp7v3_b-A?usp=sharing) to download each case in the dataset. The dataset consists of train.json, valid.json, and test.json. In each item in the json file, there are: 
+ID: the ID number of the news
+content: the content of news
+original_pictures: whether the original microblog has pictures
+video_uRL: video URL
+image_uRL: video cover image URL
+publish_place: the place of publication
+publish_time: the release time of microblog
+publish_tool: microblog publishing method
+Up_num: number of likes
+retweet_num: number of forwarding
+comment_num: number of comments
+title: title of the weibo
+
+The complete dataset is coming soon.
 
 ## About the code
 
