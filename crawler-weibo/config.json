@@ -1,0 +1,17 @@
+{
+	"user_id_list": ["1642512402"],
+    "filter": 1,
+    "since_date": "2001-01-01",
+    "write_mode": ["json"],
+    "pic_download": 0,
+    "video_download": 1,
+    "video_only": 1,
+    "cookie":"_T_WM=57224823943; SCF=Agqiunk5sSp4WHnHxOnnmFEj24DqrVBxCDfsowXe8vEO3H8IXTMtpWf1nB-SySbM4YX9baTa8t40nDypLfEcmS8.; SUHB=0LcCZFjxjceUth; SUB=_2A25zXyAkDeRhGeFM7VYT-CnIzjiIHXVQoEBsrDV6PUJbktANLWHbkW1NQNYq9iIGa0Bp5CF1H1ctJypoRM3H31bj; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9WWEpYFXIbBdLDC3Yyw21krV5JpX5KzhUgL.FoMESoBE1hMXSKB2dJLoIp7LxKML1KBLBKnLxKqL1hnLBoMNeoqXeonNSh-X",
+    "mysql_config": {
+        "host": "localhost",
+        "port": 3306,
+        "user": "root",
+        "password": "123456",
+        "charset": "utf8mb4"
+    }
+}

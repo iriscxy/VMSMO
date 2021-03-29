@@ -32,23 +32,25 @@ The complete dataset is coming soon.
 <li> numpy = 4.2
 <li> opencv python = 1.16
 </ul>
-
 ### Commands
 
-We add a preprocess file 'extract_image_features.py', by which you can obtain the feature representation, and obtain the most similar frame as the video cover.
+In the `preprocess` folder, we have `videoprocess.py`to split the videos into frames, and `dataprocess.py` to read images, and find the image label for the video. Finally, by `resnet152_img.py` in sim folder, we use resnet to extract image features. 
 
-train:
+Train:
+
 ```python
 python run_summarization.py --mode=train --data_path=* --test_path=* --vocab_path=* --log_root=logs --exp_name=vmsmo --max_enc_steps=100 --max_dec_stpes=30 --vocab_size=50000 --lr=0.001
 ```
 
-test:
+Test:
 ```python
 python run_summarization.py --mode=decode --data_path=* --test_path=* --vocab_path=* --log_root=logs --exp_name=vmsmo --max_enc_steps=100 --max_dec_stpes=30 --vocab_size=50000 --lr=0.001
 ```
 
+We also give the crawler code used to crawl videos and text from weibo website, as shown in `crawler-weibo` folder.
 
 ## Citation
+
 We appreciate your citation if you find our dataset and code beneficial.
 
 ```
