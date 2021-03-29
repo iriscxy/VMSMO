@@ -34,6 +34,9 @@ The complete dataset is coming soon.
 </ul>
 
 ### Commands
+
+We add a preprocess file 'extract_image_features.py', by which you can obtain the feature representation, and obtain the most similar frame as the video cover.
+
 train:
 ```python
 python run_summarization.py --mode=train --data_path=* --test_path=* --vocab_path=* --log_root=logs --exp_name=vmsmo --max_enc_steps=100 --max_dec_stpes=30 --vocab_size=50000 --lr=0.001
