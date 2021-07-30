@@ -21,7 +21,6 @@ We first publish the link (https://drive.google.com/drive/folders/1MpVv9naDaLINI
 ```
 Only the entries 'content', 'title', 'video_url' and 'image_url' are needed in our experiment. However, we keep all information in the json files for possible future uses.
 
-The complete dataset is coming soon.
 
 ## About the code
 
